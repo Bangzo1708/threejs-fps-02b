@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>STORMDOCK — Tactical FPS</title>
+<style>
+  :root { --xhair-gap: 8px; --accent: #ffc46b; --harbor: #3fa7ff; --storm: #ff7a2a; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #070a12;
+    font-family: "Segoe UI", Arial, sans-serif; color: #e8edf2; }
+  #game-canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+  body.scoped #game-canvas { cursor: none; }
+  .hidden { display: none !important; }
+
+  /* Crosshair: four lines that widen as the spread grows. */
+  #crosshair { position: fixed; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; z-index: 5; }
+  #crosshair i { position: absolute; background: #fff; box-shadow: 0 0 3px rgba(0,0,0,.9); }
+  #crosshair i:nth-child(1) { left: calc(-1px + var(--xhair-gap) * -1); top: -8px; width: 2px; height: 9px; }
+  #crosshair i:nth-child(2) { left: var(--xhair-gap); top: -8px; width: 2px; height: 9px; }
+  #crosshair i:nth-child(3) { left: -8px; top: calc(-1px + var(--xhair-gap) * -1); width: 9px; height: 2px; }
+  #crosshair i:nth-child(4) { left: -8px; top: var(--xhair-gap); width: 9px; height: 2px; }
+  #crosshair::after { content: ""; position: absolute; left: -1.5px; top: -1.5px; width: 3px; height: 3px; background: #fff; border-radius: 50%; }
+  body.scoped #crosshair { transform: scale(0.45); }
+  #hitmarker { position: fixed; left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px;
+    pointer-events: none; z-index: 6; opacity: 0; }
+  #hitmarker::before, #hitmarker::after { content: ""; position: absolute; inset: 0;
+    background: linear-gradient(45deg, transparent 46%, #fff 46%, #fff 54%, transparent 54%),
+                linear-gradient(-45deg, transparent 46%, #fff 46%, #fff 54%, transparent 54%); }
+  #hitmarker.kill::before, #hitmarker.kill::after { filter: invert(32%) sepia(90%) saturate(600%) hue-rotate(330deg); }
+  #hitmarker.head { transform: scale(1.35); }
+  #hitmarker.show { animation: hm .28s ease-out; }
+  @keyframes hm { 0% { opacity: 1; } 100% { opacity: 0; } }
+
+  #damage-vignette { position: fixed; inset: 0; pointer-events: none; z-index: 4; opacity: 0;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(255,30,20,.55) 100%); }
+  #damage-vignette.show { animation: dmg .5s ease-out; }
+  @keyframes dmg { 0% { opacity: 1; } 100% { opacity: 0; } }
+  #damage-dir { position: fixed; left: 50%; top: 50%; width: 130px; height: 130px; margin: -65px 0 0 -65px;
+    pointer-events: none; z-index: 4; opacity: 0; }
+  #damage-dir::before { content: ""; position: absolute; left: 50%; top: -8px; width: 34px; height: 12px;
+    margin-left: -17px; background: rgba(255,40,25,.9); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+  #damage-dir.show { animation: dmg .6s ease-out; }
+
+  /* Top bar: round, score, timer. */
+  #topbar { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 5;
+    display: flex; align-items: center; gap: 14px; background: rgba(8,12,20,.72); border: 1px solid rgba(255,255,255,.12);
+    padding: 8px 16px; border-radius: 8px; backdrop-filter: blur(4px); }
+  #topbar .score { font-size: 22px; font-weight: 800; letter-spacing: 1px; }
+  #score-harbor { color: var(--harbor); } #score-storm { color: var(--storm); }
+  #round-num { font-size: 11px; letter-spacing: 2px; color: #9aa7b5; }
+  #phase-label { font-size: 11px; letter-spacing: 2px; color: var(--accent); }
+  #timer { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  #timer.danger { color: #ff5a4e; } #timer.bomb { color: #ff3b30; animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: .35; } }
+  #alive-line { font-size: 11px; color: #9aa7b5; letter-spacing: 1px; }
+
+  /* Bottom-left: health + armor. */
+  #health-wrap { position: fixed; left: 18px; bottom: 18px; z-index: 5; width: 240px; }
+  #health-wrap .row { display: flex; align-items: baseline; gap: 8px; }
+  #health-num { font-size: 44px; font-weight: 800; line-height: 1; }
+  #health-wrap .lbl { font-size: 11px; letter-spacing: 2px; color: #9aa7b5; }
+  .bar { height: 8px; background: rgba(255,255,255,.14); border-radius: 4px; overflow: hidden; margin-top: 6px; }
+  .bar i { display: block; height: 100%; background: #39d353; border-radius: 4px; transition: width .15s; }
+  #armor-bar { background: var(--harbor); }
+  #health-wrap.low #health-num { color: #ff5a4e; }
+  #health-wrap.low .bar i { background: #ff5a4e; }
+
+  /* Bottom-right: money, weapon, ammo. */
+  #loadout { position: fixed; right: 18px; bottom: 18px; z-index: 5; text-align: right; }
+  #money-num { font-size: 30px; font-weight: 800; color: var(--accent); }
+  #weapon-name { font-size: 13px; letter-spacing: 2px; color: #c8d2dc; }
+  #ammo-mag { font-size: 40px; font-weight: 800; line-height: 1; }
+  #ammo-reserve { font-size: 16px; color: #9aa7b5; }
+  #kills-line { font-size: 11px; letter-spacing: 2px; color: #9aa7b5; margin-top: 4px; }
+
+  /* Killfeed, minimap, bomb indicator. */
+  #killfeed { position: fixed; top: 16px; right: 16px; z-index: 5; text-align: right; font-size: 13px; }
+  .kf-row { background: rgba(8,12,20,.72); padding: 5px 10px; border-radius: 5px; margin-bottom: 5px;
+    border-right: 3px solid var(--storm); transition: opacity .6s; }
+  .kf-row.good { border-right-color: var(--harbor); }
+  .kf-row.fade { opacity: 0; }
+  #minimap { position: fixed; left: 18px; top: 16px; z-index: 5; border: 1px solid rgba(255,255,255,.18); border-radius: 6px; }
+  #bomb-indicator { position: fixed; top: 84px; left: 50%; transform: translateX(-50%); z-index: 5;
+    font-size: 13px; font-weight: 800; letter-spacing: 2px; color: #ff5a4e; display: none; }
+  #bomb-indicator.show { display: block; animation: blink 1s steps(2) infinite; }
+
+  /* Banners and center messages. */
+  #banner { position: fixed; left: 50%; top: 26%; transform: translate(-50%,-50%) scale(.94); z-index: 7;
+    text-align: center; opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s; }
+  #banner.show { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+  .banner-title { font-size: 46px; font-weight: 900; letter-spacing: 4px; text-shadow: 0 3px 18px rgba(0,0,0,.8); }
+  #banner.good .banner-title { color: #39d353; } #banner.bad .banner-title { color: #ff5a4e; }
+  .banner-sub { font-size: 15px; color: #c8d2dc; margin-top: 6px; }
+  #center-msg { position: fixed; left: 50%; top: 38%; transform: translateX(-50%); z-index: 7; text-align: center; display: none; }
+  #center-msg.show { display: block; }
+  .center-title { font-size: 26px; font-weight: 800; letter-spacing: 2px; text-shadow: 0 2px 12px rgba(0,0,0,.9); }
+  .center-sub { font-size: 14px; color: #c8d2dc; margin-top: 4px; }
+
+  /* Plant / defuse progress. */
+  #plant-bar { position: fixed; left: 50%; bottom: 24%; transform: translateX(-50%); z-index: 6; width: 300px; display: none; }
+  #plant-bar.show { display: block; }
+  .plant-label { text-align: center; font-size: 12px; letter-spacing: 2px; margin-bottom: 6px; color: var(--accent); }
+  .plant-track { height: 10px; background: rgba(255,255,255,.16); border-radius: 5px; overflow: hidden; }
+  .plant-fill { height: 100%; width: 0%; background: var(--accent); }
+
+  /* Buy menu. */
+  #buy-menu { position: fixed; left: 50%; top: 50%; transform: translate(-50%,-50%); z-index: 8; width: 560px;
+    background: rgba(8,12,20,.94); border: 1px solid rgba(255,196,107,.35); border-radius: 10px; padding: 18px 20px; display: none; }
+  #buy-menu.show { display: block; }
+  #buy-menu h2 { font-size: 18px; letter-spacing: 3px; }
+  #buy-money { color: var(--accent); font-weight: 800; }
+  #buy-list { margin-top: 12px; }
+  .buy-row { display: flex; width: 100%; gap: 12px; align-items: center; text-align: left; background: rgba(255,255,255,.05);
+    border: 1px solid rgba(255,255,255,.08); color: #e8edf2; padding: 9px 12px; border-radius: 6px; margin-bottom: 6px; cursor: pointer; }
+  .buy-row:hover:not(.disabled) { background: rgba(255,196,107,.16); border-color: rgba(255,196,107,.5); }
+  .buy-row.disabled { opacity: .38; cursor: default; }
+  .buy-key { width: 22px; height: 22px; border: 1px solid rgba(255,255,255,.35); border-radius: 4px;
+    display: inline-flex; align-items: center; justify-content: center; font-size: 12px; }
+  .buy-name { font-weight: 700; width: 170px; }
+  .buy-desc { flex: 1; font-size: 12px; color: #9aa7b5; }
+  .buy-price { font-weight: 800; color: var(--accent); }
+  .buy-hint { font-size: 12px; color: #9aa7b5; margin-top: 8px; }
+
+  /* Full-screen menu and death screen. */
+  .overlay { position: fixed; inset: 0; z-index: 10; display: none; align-items: center; justify-content: center;
+    flex-direction: column; background: radial-gradient(ellipse at center, rgba(10,16,28,.82), rgba(4,6,10,.96)); text-align: center; }
+  .overlay.show { display: flex; }
+  .menu-title { font-size: 58px; font-weight: 900; letter-spacing: 8px; }
+  .menu-title em { font-style: normal; color: var(--accent); }
+  .menu-sub { font-size: 15px; color: #c8d2dc; max-width: 560px; line-height: 1.6; margin: 14px 0 22px; }
+  .menu-button { font-size: 17px; font-weight: 800; letter-spacing: 2px; padding: 13px 42px; border: none; border-radius: 8px;
+    background: var(--accent); color: #14100a; cursor: pointer; }
+  .menu-button:hover { filter: brightness(1.1); }
+  .menu-keys { font-size: 12px; color: #8a97a5; margin-top: 18px; line-height: 1.9; letter-spacing: 1px; }
+  .death-killer { font-size: 30px; font-weight: 800; }
+  .death-weapon { font-size: 14px; color: #9aa7b5; margin-top: 6px; }
+  #death-screen { background: rgba(20,4,4,.72); }
+  #death-screen .menu-button { margin-top: 22px; background: #e8edf2; color: #14100a; }
+</style>
+</head>
+<body>
+<canvas id="game-canvas"></canvas>
+
+<div id="crosshair"><i></i><i></i><i></i><i></i></div>
+<div id="hitmarker"></div>
+<div id="damage-vignette"></div>
+<div id="damage-dir"></div>
+
+<canvas id="minimap" width="168" height="126"></canvas>
+
+<div id="topbar">
+  <div><div id="round-num">ROUND 1</div><div id="phase-label">BUY PHASE</div></div>
+  <div class="score"><span id="score-harbor">0</span> : <span id="score-storm">0</span></div>
+  <div id="timer">0:12</div>
+  <div id="alive-line"><span id="alive-harbor">● 5</span> &nbsp; <span id="alive-storm">● 5</span></div>
+</div>
+<div id="bomb-indicator"></div>
+
+<div id="killfeed"></div>
+
+<div id="health-wrap">
+  <div class="row"><span id="health-num">100</span><span class="lbl">HEALTH</span></div>
+  <div class="bar"><i id="health-bar" style="width:100%"></i></div>
+  <div class="bar"><i id="armor-bar" style="width:0%"></i></div>
+</div>
+
+<div id="loadout">
+  <div id="money-num">$800</div>
+  <div id="weapon-name">P2000</div>
+  <div><span id="ammo-mag">13</span> <span id="ammo-reserve">/ 52</span></div>
+  <div id="kills-line">ELIMINATIONS <span id="kills-num">0</span></div>
+</div>
+
+<div id="banner"><div class="banner-title"></div><div class="banner-sub"></div></div>
+<div id="center-msg"><div class="center-title"></div><div class="center-sub"></div></div>
+<div id="plant-bar"><div class="plant-label">PLANTING</div><div class="plant-track"><div class="plant-fill"></div></div></div>
+
+<div id="buy-menu">
+  <h2>BUY EQUIPMENT &nbsp;·&nbsp; <span id="buy-money">$800</span></h2>
+  <div id="buy-list"></div>
+  <div class="buy-hint">Keys 1–8 buy · B or ESC closes · the buy phase ends when the timer hits zero.</div>
+</div>
+
+<div id="menu" class="overlay show">
+  <div class="menu-title">STORM<em>DOCK</em></div>
+  <div class="menu-sub">A night container port in a storm. Five Harbor defenders hold two bomb
+    sites against five Storm attackers. Win the round by eliminating the enemy team, or by
+    planting — or stopping — the bomb. Money earned buys better guns between rounds.</div>
+  <button class="menu-button">DEPLOY</button>
+  <div class="menu-keys">WASD MOVE &nbsp;·&nbsp; MOUSE AIM &nbsp;·&nbsp; CLICK FIRE &nbsp;·&nbsp; R RELOAD &nbsp;·&nbsp; B BUY &nbsp;·&nbsp; E PLANT / DEFUSE &nbsp;·&nbsp; RIGHT-CLICK SCOPE &nbsp;·&nbsp; SHIFT WALK</div>
+</div>
+
+<div id="death-screen" class="overlay">
+  <div class="death-killer">Eliminated</div>
+  <div class="death-weapon"></div>
+  <button class="menu-button" id="spectate-btn">SPECTATE</button>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.min.js" } }
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
